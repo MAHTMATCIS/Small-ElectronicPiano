@@ -72,10 +72,6 @@ def messageon(note,no):
         info+=1
     if note.key == 1073741905 and no == 'on':
         info -= 1
-    if note.key==1073741903 and no == 'on':
-        cnt+=1
-    if note.key == 1073741904 and no == 'on':
-        cnt -= 1
     unicode=note.unicode
     unicode:str
     if note.unicode.isupper():
