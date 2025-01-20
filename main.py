@@ -1,3 +1,4 @@
+import threading
 import time
 import pygame
 import mido
@@ -56,11 +57,37 @@ keypos={
 }
 hold=0
 info=0
+looping=[lambda :mido.Message('note_on', note=60, velocity=127), 0.01]
+isloop=0
+
+def loop():
+    try:
+
+        while not output_port.closed:
+            if not isloop or  now != 1:
+                time.sleep(0.001)
+                continue
+            for i in looping:
+                if not isloop:
+                    continue
+                if type(i)==float:
+                    time.sleep(i/speed)
+                else:
+                    x=i()
+                    if x is not None:
+                        output_port.send(x)
+    except:
+        return
 
 
 cnt=1
+transcribe=False
+newRecored=[]
+tix=None
+
 def messageon(note,no):
-    global hold,info,cnt
+    global hold,info,cnt,isloop,transcribe,tix,looping
+
     if note.unicode == ' ' and no=='on':
         hold=~hold
         output_port.send(mido.Message('control_change', control=64, value=127 if hold else 0))
@@ -72,15 +99,32 @@ def messageon(note,no):
         info+=1
     if note.key == 1073741905 and no == 'on':
         info -= 1
+    if note.key == 1073742050 and no == 'on':
+        isloop =~ isloop
+    if note.key == 1073742048 and no == 'on':
+        transcribe =~ transcribe
+        if transcribe:
+            newRecored.clear()
+        else:
+            tix=None
+            looping=newRecored
     unicode=note.unicode
     unicode:str
     if note.unicode.isupper():
         unicode = unicode.lower()
     print(unicode if unicode != "\r" else "\n")
     if unicode in keypos:
+        if tix is None:
+            if transcribe:
+                tix=time.time()
         try:
             for i in range(cnt):
-                output_port.send(mido.Message('note_'+no, note=keypos[unicode]+info, velocity=127))
+                b=mido.Message('note_'+no, note=keypos[unicode]+info, velocity=127)
+                output_port.send(b)
+                if transcribe:
+                    newRecored.append((time.time()-tix)*speed)
+                    tix=time.time()
+                    newRecored.append(lambda :b)
         except:
             print('error')
 
@@ -122,19 +166,68 @@ if output_names:
 win=pygame.display.set_mode((500,500))
 clock=pygame.time.Clock()
 f=pygame.font.Font('nunito-bold.ttf',50)
-
+t=threading.Thread(target=loop).start()
+speed=60
+pat=4
+now=0
+nowtime=time.time()
 while True:
-    a=f.render("Listening!",1,(255,255,255))
+    win.fill((0,0,0))
+    if time.time()-nowtime>60/speed:
+        now+=1
+        if now>pat:
+            now=1
+        nowtime=time.time()
+        b = mido.Message('note_on', note=127, velocity=127)
+        output_port.send(b)
+        b = mido.Message('note_off', note=127, velocity=127)
+        output_port.send(b)
+        if now == 1:
+            b = mido.Message('note_on', note=126, velocity=127)
+            output_port.send(b)
+            b = mido.Message('note_off', note=126, velocity=127)
+            output_port.send(b)
+            b = mido.Message('note_on', note=125, velocity=127)
+            output_port.send(b)
+            b = mido.Message('note_off', note=125, velocity=127)
+            output_port.send(b)
+
+
+    a=f.render("Listening!" if not transcribe else "Recording!",1,(255,255,255)if not transcribe else (255,0,0))
     win.blit(a,(250-a.get_width()//2,250-a.get_height()//2))
+
+    a = f.render("Speed:"+str(speed)+';Pat:'+str(pat), 1,
+                 (255, 255, 255) )
+    win.blit(a, (250 - a.get_width() // 2, 250 - a.get_height() // 2-50))
+    a = f.render("Now:"+str(now), 1,
+                 (255, 255, 255) if not now==1 else (0, 255, 0))
+    win.blit(a, (250 - a.get_width() // 2, 250 - a.get_height() // 2+50))
     pygame.display.flip()
     for event in pygame.event.get():
         if event.type==pygame.QUIT:
             pygame.quit()
             output_port.close()
             exit()
+            looping=False
         if event.type==pygame.KEYDOWN:
             messageon(event,'on')
         if event.type == pygame.KEYUP:
             messageon(event,'off')
+        if event.type==pygame.MOUSEBUTTONDOWN:
+            if event.button==1:
+                speed+=1
+            if event.button==2:
+                if pat==4:
+                    pat=3
+                elif pat == 3:
+                    pat=2
+                elif pat== 2:
+                    pat=1
+                elif pat==1:
+                    pat=5
+                else :pat=4
+            if event.button==3:
+                if speed>1:
+                    speed-=1
 
     clock.tick(240)
